@@ -1,8 +1,9 @@
 fastapi
 uvicorn
-streamlit
 scikit-learn
 joblib
 numpy
 pandas
+streamlit
 requests
+plotly

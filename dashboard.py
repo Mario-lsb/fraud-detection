@@ -184,120 +184,166 @@ st.markdown(f'<div style="background:white;border:1px solid #E2E8F0;border-radiu
 
 # ── Analysis ───────────────────────────────────────────────────────────────────
 if run:
-    with st.spinner("Running all 4 models... (first request may take ~15s if API is waking up)"):
-        try:
-            res      = requests.post(API_URL, json={"features": features}, timeout=60).json()
-            is_fraud = res["fraud_detected"]
-            prob     = res["rf_fraud_probability"]
+    import time
+    try:
+        with st.spinner("Contacting API... (may take ~15s if waking up)"):
+            res  = requests.post(API_URL, json={"features": features}, timeout=60).json()
+        is_fraud = res["fraud_detected"]
+        prob     = res["rf_fraud_probability"]
+        lr_flag  = bool(res["logistic_regression"])
+        rf_flag  = bool(res["random_forest"])
+        iso_flag = bool(res["isolation_forest"])
+        ae_flag  = prob > 70
 
-            st.session_state.total_checked += 1
-            if is_fraud:
-                st.session_state.fraud_count += 1
+        st.session_state.total_checked += 1
+        if is_fraud:
+            st.session_state.fraud_count += 1
+        st.session_state.history.append({
+            "index":   st.session_state.total_checked,
+            "sample":  int(st.session_state.sample_index),
+            "fraud":   is_fraud,
+            "votes":   res["votes"],
+            "rf_prob": prob,
+            "lr":      res["logistic_regression"],
+            "rf":      res["random_forest"],
+            "iso":     res["isolation_forest"],
+            "time":    datetime.now().strftime("%H:%M:%S"),
+        })
 
-            st.session_state.history.append({
-                "index":   st.session_state.total_checked,
-                "sample":  int(st.session_state.sample_index),
-                "fraud":   is_fraud,
-                "votes":   res["votes"],
-                "rf_prob": prob,
-                "lr":      res["logistic_regression"],
-                "rf":      res["random_forest"],
-                "iso":     res["isolation_forest"],
-                "time":    datetime.now().strftime("%H:%M:%S"),
-            })
+        # ── EARLY DETECTION STAGES ─────────────────────────────────────────────
+        st.markdown('<div class="sec-label">⚡ Early Detection Pipeline</div>', unsafe_allow_html=True)
 
-            # Result banner
-            if is_fraud:
-                st.markdown(f'<div class="fraud-banner"><div class="banner-title" style="color:#DC2626">🚨 FRAUD DETECTED</div><div class="banner-sub">{res["votes"]}</div></div>', unsafe_allow_html=True)
-            else:
-                st.markdown(f'<div class="legit-banner"><div class="banner-title" style="color:#16A34A">✅ LEGITIMATE TRANSACTION</div><div class="banner-sub">{res["votes"]}</div></div>', unsafe_allow_html=True)
+        stage_ph = [st.empty() for _ in range(4)]
 
-            st.markdown("<br>", unsafe_allow_html=True)
+        # Stage 1 — Logistic Regression (fastest, linear model)
+        stage_ph[0].markdown('<div style="background:#FFF7ED;border:1px solid #FED7AA;border-radius:10px;padding:10px 16px;margin-bottom:8px;font-size:.88rem;color:#92400E;">⏳ Stage 1 — Logistic Regression: Scanning...</div>', unsafe_allow_html=True)
+        time.sleep(0.6)
+        if lr_flag:
+            stage_ph[0].markdown('<div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:10px;padding:10px 16px;margin-bottom:8px;font-size:.88rem;"><b style="color:#DC2626;">⚠️ Stage 1 — Logistic Regression:</b> <span style="color:#EF4444;">Early Warning — Suspicious pattern detected</span></div>', unsafe_allow_html=True)
+        else:
+            stage_ph[0].markdown('<div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:10px;padding:10px 16px;margin-bottom:8px;font-size:.88rem;"><b style="color:#15803D;">✅ Stage 1 — Logistic Regression:</b> <span style="color:#16A34A;">Clear — No linear fraud pattern</span></div>', unsafe_allow_html=True)
 
-            # Model cards
-            st.markdown('<div class="sec-label">🤖 Model Predictions</div>', unsafe_allow_html=True)
-            mc1, mc2, mc3, mc4 = st.columns(4)
+        # Stage 2 — Random Forest + probability
+        stage_ph[1].markdown('<div style="background:#FFF7ED;border:1px solid #FED7AA;border-radius:10px;padding:10px 16px;margin-bottom:8px;font-size:.88rem;color:#92400E;">⏳ Stage 2 — Random Forest: Analysing 100 decision trees...</div>', unsafe_allow_html=True)
+        time.sleep(0.8)
+        if prob > 70:
+            stage_ph[1].markdown(f'<div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:10px;padding:10px 16px;margin-bottom:8px;font-size:.88rem;"><b style="color:#DC2626;">🔴 Stage 2 — Random Forest:</b> <span style="color:#EF4444;">HIGH RISK — Fraud probability {prob}% · Recommend blocking transaction</span></div>', unsafe_allow_html=True)
+        elif prob > 40:
+            stage_ph[1].markdown(f'<div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:10px;padding:10px 16px;margin-bottom:8px;font-size:.88rem;"><b style="color:#B45309;">🟡 Stage 2 — Random Forest:</b> <span style="color:#D97706;">MEDIUM RISK — Fraud probability {prob}% · Flag for review</span></div>', unsafe_allow_html=True)
+        else:
+            stage_ph[1].markdown(f'<div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:10px;padding:10px 16px;margin-bottom:8px;font-size:.88rem;"><b style="color:#15803D;">✅ Stage 2 — Random Forest:</b> <span style="color:#16A34A;">LOW RISK — Fraud probability {prob}%</span></div>', unsafe_allow_html=True)
 
-            def mcard(col, name, fraud_flag):
-                lbl = "🚨 Fraud" if fraud_flag else "✅ Legit"
-                cls = "mcard-fraud" if fraud_flag else "mcard-legit"
-                col.markdown(f'<div class="mcard"><div class="mcard-label">{name}</div><div class="{cls}">{lbl}</div></div>', unsafe_allow_html=True)
+        # Stage 3 — Isolation Forest
+        stage_ph[2].markdown('<div style="background:#FFF7ED;border:1px solid #FED7AA;border-radius:10px;padding:10px 16px;margin-bottom:8px;font-size:.88rem;color:#92400E;">⏳ Stage 3 — Isolation Forest: Checking for anomalies...</div>', unsafe_allow_html=True)
+        time.sleep(0.6)
+        if iso_flag:
+            stage_ph[2].markdown('<div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:10px;padding:10px 16px;margin-bottom:8px;font-size:.88rem;"><b style="color:#DC2626;">⚠️ Stage 3 — Isolation Forest:</b> <span style="color:#EF4444;">Anomaly Detected — Transaction behaviour is abnormal</span></div>', unsafe_allow_html=True)
+        else:
+            stage_ph[2].markdown('<div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:10px;padding:10px 16px;margin-bottom:8px;font-size:.88rem;"><b style="color:#15803D;">✅ Stage 3 — Isolation Forest:</b> <span style="color:#16A34A;">Normal — Transaction within expected range</span></div>', unsafe_allow_html=True)
 
-            mcard(mc1, "Logistic Regression", bool(res["logistic_regression"]))
-            mcard(mc2, "Random Forest",        bool(res["random_forest"]))
-            mcard(mc3, "Isolation Forest",     bool(res["isolation_forest"]))
-            mc4.markdown(f'<div class="mcard"><div class="mcard-label">RF Fraud Probability</div><div class="{"mcard-fraud" if prob>50 else "mcard-legit"}" style="font-size:1.3rem">{prob}%</div></div>', unsafe_allow_html=True)
+        # Stage 4 — AE Proxy + Final verdict
+        stage_ph[3].markdown('<div style="background:#FFF7ED;border:1px solid #FED7AA;border-radius:10px;padding:10px 16px;margin-bottom:8px;font-size:.88rem;color:#92400E;">⏳ Stage 4 — Autoencoder Proxy: Computing reconstruction error...</div>', unsafe_allow_html=True)
+        time.sleep(0.6)
+        if ae_flag:
+            stage_ph[3].markdown('<div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:10px;padding:10px 16px;margin-bottom:8px;font-size:.88rem;"><b style="color:#DC2626;">⚠️ Stage 4 — Autoencoder Proxy:</b> <span style="color:#EF4444;">High reconstruction error — Transaction does not match normal patterns</span></div>', unsafe_allow_html=True)
+        else:
+            stage_ph[3].markdown('<div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:10px;padding:10px 16px;margin-bottom:8px;font-size:.88rem;"><b style="color:#15803D;">✅ Stage 4 — Autoencoder Proxy:</b> <span style="color:#16A34A;">Normal reconstruction — Pattern matches legitimate transactions</span></div>', unsafe_allow_html=True)
 
-            st.markdown("<br>", unsafe_allow_html=True)
+        time.sleep(0.4)
+        st.markdown("<br>", unsafe_allow_html=True)
 
-            # Charts
-            st.markdown('<div class="sec-label">📊 Model Prediction Breakdown</div>', unsafe_allow_html=True)
-            c1, c2 = st.columns(2)
+        # Final verdict banner
+        if is_fraud:
+            st.markdown(f'<div class="fraud-banner"><div class="banner-title" style="color:#DC2626">🚨 FRAUD DETECTED</div><div class="banner-sub">{res["votes"]} · Transaction blocked at earliest possible stage</div></div>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="legit-banner"><div class="banner-title" style="color:#16A34A">✅ LEGITIMATE TRANSACTION</div><div class="banner-sub">{res["votes"]} · Transaction cleared through all stages</div></div>', unsafe_allow_html=True)
 
-            with c1:
-                vv = [res["logistic_regression"], res["random_forest"],
-                      res["isolation_forest"], 1 if prob > 70 else 0]
-                vn = ["Logistic Reg.", "Random Forest", "Isolation Forest", "AE Proxy"]
-                fig1 = go.Figure(go.Bar(
-                    x=vn, y=vv,
-                    marker_color=["#EF4444" if v else "#10B981" for v in vv],
-                    text=["🚨 Fraud" if v else "✅ Legit" for v in vv],
-                    textposition="outside",
-                    textfont=dict(family="DM Sans", size=13)
-                ))
-                fig1.update_layout(
-                    title=dict(text="Model Votes", font=dict(family="DM Sans", size=15, color="#1E293B")),
-                    paper_bgcolor="white", plot_bgcolor="white",
-                    font=dict(family="DM Sans", color="#1E293B"),
-                    yaxis=dict(range=[0,1.8], tickvals=[0,1], ticktext=["Legit","Fraud"], gridcolor="#F1F5F9"),
-                    xaxis=dict(gridcolor="#F1F5F9"),
-                    margin=dict(t=50,b=10,l=10,r=10), height=300, showlegend=False
-                )
-                st.plotly_chart(fig1, use_container_width=True)
+        st.markdown("<br>", unsafe_allow_html=True)
 
-            with c2:
-                fig2 = go.Figure(go.Indicator(
-                    mode="gauge+number+delta",
-                    value=prob,
-                    number={"suffix":"%","font":{"size":38,"family":"DM Mono",
-                            "color":"#EF4444" if prob>50 else "#10B981"}},
-                    delta={"reference":50,"increasing":{"color":"#EF4444"},"decreasing":{"color":"#10B981"}},
-                    gauge={
-                        "axis":{"range":[0,100],"tickfont":{"family":"DM Sans"}},
-                        "bar": {"color":"#EF4444" if prob>50 else "#10B981","thickness":.28},
-                        "steps":[
-                            {"range":[0,30],  "color":"#DCFCE7"},
-                            {"range":[30,70], "color":"#FEF9C3"},
-                            {"range":[70,100],"color":"#FEE2E2"},
-                        ],
-                        "threshold":{"line":{"color":"#4F6EF7","width":3},"thickness":.75,"value":50}
-                    },
-                    title={"text":"RF Fraud Probability","font":{"family":"DM Sans","size":14,"color":"#64748B"}}
-                ))
-                fig2.update_layout(paper_bgcolor="white", margin=dict(t=30,b=10,l=20,r=20), height=300)
-                st.plotly_chart(fig2, use_container_width=True)
+        # Model cards
+        st.markdown('<div class="sec-label">🤖 Model Predictions</div>', unsafe_allow_html=True)
+        mc1, mc2, mc3, mc4 = st.columns(4)
 
-            # Feature heatmap
-            st.markdown('<div class="sec-label">🔬 Feature Values (Current Transaction)</div>', unsafe_allow_html=True)
-            fig3 = go.Figure(go.Heatmap(
-                z=np.array(features).reshape(1,-1),
-                x=[f"V{i+1}" for i in range(len(features))],
-                colorscale="RdYlGn_r", showscale=True,
+        def mcard(col, name, fraud_flag):
+            lbl = "🚨 Fraud" if fraud_flag else "✅ Legit"
+            cls = "mcard-fraud" if fraud_flag else "mcard-legit"
+            col.markdown(f'<div class="mcard"><div class="mcard-label">{name}</div><div class="{cls}">{lbl}</div></div>', unsafe_allow_html=True)
+
+        mcard(mc1, "Logistic Regression", lr_flag)
+        mcard(mc2, "Random Forest",        rf_flag)
+        mcard(mc3, "Isolation Forest",     iso_flag)
+        mc4.markdown(f'<div class="mcard"><div class="mcard-label">RF Fraud Probability</div><div class="{"mcard-fraud" if prob>50 else "mcard-legit"}" style="font-size:1.3rem">{prob}%</div></div>', unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Charts
+        st.markdown('<div class="sec-label">📊 Model Prediction Breakdown</div>', unsafe_allow_html=True)
+        c1, c2 = st.columns(2)
+
+        with c1:
+            vv = [res["logistic_regression"], res["random_forest"],
+                  res["isolation_forest"], 1 if prob > 70 else 0]
+            vn = ["Logistic Reg.", "Random Forest", "Isolation Forest", "AE Proxy"]
+            fig1 = go.Figure(go.Bar(
+                x=vn, y=vv,
+                marker_color=["#EF4444" if v else "#10B981" for v in vv],
+                text=["🚨 Fraud" if v else "✅ Legit" for v in vv],
+                textposition="outside",
+                textfont=dict(family="DM Sans", size=13)
             ))
-            fig3.update_layout(
+            fig1.update_layout(
+                title=dict(text="Model Votes", font=dict(family="DM Sans", size=15, color="#1E293B")),
                 paper_bgcolor="white", plot_bgcolor="white",
-                font=dict(family="DM Sans"),
-                margin=dict(t=10,b=10,l=10,r=10), height=130,
-                yaxis=dict(showticklabels=False),
-                xaxis=dict(tickfont=dict(size=9))
+                font=dict(family="DM Sans", color="#1E293B"),
+                yaxis=dict(range=[0,1.8], tickvals=[0,1], ticktext=["Legit","Fraud"], gridcolor="#F1F5F9"),
+                xaxis=dict(gridcolor="#F1F5F9"),
+                margin=dict(t=50,b=10,l=10,r=10), height=300, showlegend=False
             )
-            st.plotly_chart(fig3, use_container_width=True)
+            st.plotly_chart(fig1, use_container_width=True)
 
-        except requests.exceptions.ConnectionError:
-            st.error("❌ Cannot connect to the API.")
-            st.info("👉 If deployed: the Render API may be waking up (free tier sleeps after 15 min). Wait 30 seconds and try again.\n\n👉 If running locally: make sure uvicorn is running:\n```\npython -m uvicorn app:app --reload\n```")
-        except Exception as e:
-            st.error(f"Unexpected error: {e}")
+        with c2:
+            fig2 = go.Figure(go.Indicator(
+                mode="gauge+number+delta",
+                value=prob,
+                number={"suffix":"%","font":{"size":38,"family":"DM Mono",
+                        "color":"#EF4444" if prob>50 else "#10B981"}},
+                delta={"reference":50,"increasing":{"color":"#EF4444"},"decreasing":{"color":"#10B981"}},
+                gauge={
+                    "axis":{"range":[0,100],"tickfont":{"family":"DM Sans"}},
+                    "bar": {"color":"#EF4444" if prob>50 else "#10B981","thickness":.28},
+                    "steps":[
+                        {"range":[0,30],  "color":"#DCFCE7"},
+                        {"range":[30,70], "color":"#FEF9C3"},
+                        {"range":[70,100],"color":"#FEE2E2"},
+                    ],
+                    "threshold":{"line":{"color":"#4F6EF7","width":3},"thickness":.75,"value":50}
+                },
+                title={"text":"RF Fraud Probability","font":{"family":"DM Sans","size":14,"color":"#64748B"}}
+            ))
+            fig2.update_layout(paper_bgcolor="white", margin=dict(t=30,b=10,l=20,r=20), height=300)
+            st.plotly_chart(fig2, use_container_width=True)
+
+        # Feature heatmap
+        st.markdown('<div class="sec-label">🔬 Feature Values (Current Transaction)</div>', unsafe_allow_html=True)
+        fig3 = go.Figure(go.Heatmap(
+            z=np.array(features).reshape(1,-1),
+            x=[f"V{i+1}" for i in range(len(features))],
+            colorscale="RdYlGn_r", showscale=True,
+        ))
+        fig3.update_layout(
+            paper_bgcolor="white", plot_bgcolor="white",
+            font=dict(family="DM Sans"),
+            margin=dict(t=10,b=10,l=10,r=10), height=130,
+            yaxis=dict(showticklabels=False),
+            xaxis=dict(tickfont=dict(size=9))
+        )
+        st.plotly_chart(fig3, use_container_width=True)
+
+    except requests.exceptions.ConnectionError:
+        st.error("❌ Cannot connect to the API.")
+        st.info("👉 If deployed: the Render API may be waking up. Wait 30 seconds and try again.\n\n👉 If local: run `python -m uvicorn app:app --reload`")
+    except Exception as e:
+        st.error(f"Unexpected error: {e}")
 
 # ── History ────────────────────────────────────────────────────────────────────
 history = st.session_state.history

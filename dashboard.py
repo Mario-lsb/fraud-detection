@@ -21,20 +21,31 @@ html, body, [data-testid="stAppViewContainer"], .main {
 }
 [data-testid="stSidebar"] * { color: #1E293B !important; }
 
-/* Number input — white background, dark text, clearly visible */
-[data-testid="stSidebar"] input[type="number"] {
+/* Fix ALL inputs in sidebar — white background, visible text */
+[data-testid="stSidebar"] input,
+[data-testid="stSidebar"] input[type="text"],
+[data-testid="stSidebar"] input[type="number"],
+[data-testid="stSidebar"] div[data-baseweb="input"] input {
     background: #FFFFFF !important;
+    background-color: #FFFFFF !important;
     color: #1E293B !important;
     border: 2px solid #C7D2FE !important;
     border-radius: 10px !important;
-    font-size: 1.1rem !important;
+    font-size: 1.05rem !important;
     font-weight: 600 !important;
     padding: 8px 12px !important;
+    -webkit-text-fill-color: #1E293B !important;
 }
-[data-testid="stSidebar"] input[type="number"]:focus {
+[data-testid="stSidebar"] div[data-baseweb="input"] {
+    background: #FFFFFF !important;
+    background-color: #FFFFFF !important;
+    border: 2px solid #C7D2FE !important;
+    border-radius: 10px !important;
+}
+[data-testid="stSidebar"] input:focus,
+[data-testid="stSidebar"] div[data-baseweb="input"]:focus-within {
     border-color: #4F6EF7 !important;
     box-shadow: 0 0 0 3px rgba(79,110,247,.15) !important;
-    outline: none !important;
 }
 
 div.stButton > button {
@@ -173,9 +184,9 @@ st.markdown(f'<div style="background:white;border:1px solid #E2E8F0;border-radiu
 
 # ── Analysis ───────────────────────────────────────────────────────────────────
 if run:
-    with st.spinner("Running all 4 models..."):
+    with st.spinner("Running all 4 models... (first request may take ~15s if API is waking up)"):
         try:
-            res      = requests.post(API_URL, json={"features": features}, timeout=15).json()
+            res      = requests.post(API_URL, json={"features": features}, timeout=60).json()
             is_fraud = res["fraud_detected"]
             prob     = res["rf_fraud_probability"]
 
@@ -284,7 +295,7 @@ if run:
 
         except requests.exceptions.ConnectionError:
             st.error("❌ Cannot connect to the API.")
-            st.info("👉 Open a NEW terminal and run:\n```\npython -m uvicorn app:app --reload\n```")
+            st.info("👉 If deployed: the Render API may be waking up (free tier sleeps after 15 min). Wait 30 seconds and try again.\n\n👉 If running locally: make sure uvicorn is running:\n```\npython -m uvicorn app:app --reload\n```")
         except Exception as e:
             st.error(f"Unexpected error: {e}")
 

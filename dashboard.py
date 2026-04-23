@@ -110,8 +110,7 @@ except FileNotFoundError:
     y_test        = None
     has_labels    = False
     fraud_indices = []
-
-API_URL    = os.environ.get("API_URL", "http://127.0.0.1:8000") + "/predict"
+API_URL = os.environ.get("API_URL", "https://fraud-detection-e8x0.onrender.com") + "/predict"
 total      = st.session_state.total_checked
 fraud_cnt  = st.session_state.fraud_count
 fraud_rate = (fraud_cnt / total * 100) if total > 0 else 0.0

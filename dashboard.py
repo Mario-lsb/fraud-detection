@@ -416,3 +416,117 @@ if history:
             margin=dict(t=10,b=10,l=10,r=10), height=260
         )
         st.plotly_chart(fig5, use_container_width=True)
+        # ── Persistent Monitoring (from predictions.db) ────────────────────────────────
+import sqlite3
+
+DB_PATH = "predictions.db"
+
+def load_db():
+    if not os.path.exists(DB_PATH):
+        return pd.DataFrame()
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql_query(
+        "SELECT * FROM predictions ORDER BY id ASC", conn
+    )
+    conn.close()
+    return df
+
+st.markdown("---")
+st.markdown('<div class="sec-label">📡 Live Monitoring — Persistent Database</div>', unsafe_allow_html=True)
+
+df_db = load_db()
+
+if df_db.empty:
+    st.info("No persistent data yet. Run the simulator or analyse some transactions.")
+else:
+    total_db  = len(df_db)
+    fraud_db  = int(df_db["fraud_detected"].sum())
+    legit_db  = total_db - fraud_db
+    rate_db   = round((fraud_db / total_db) * 100, 2) if total_db > 0 else 0
+    avg_prob  = round(df_db["rf_probability"].mean(), 1)
+
+    # KPI row
+    k1, k2, k3, k4 = st.columns(4)
+    k1.markdown(f'<div class="mcard"><div class="mcard-label">Total Logged</div><div style="font-size:1.4rem;font-weight:700;color:#4F6EF7">{total_db}</div></div>', unsafe_allow_html=True)
+    k2.markdown(f'<div class="mcard"><div class="mcard-label">Fraud Detected</div><div style="font-size:1.4rem;font-weight:700;color:#EF4444">{fraud_db}</div></div>', unsafe_allow_html=True)
+    k3.markdown(f'<div class="mcard"><div class="mcard-label">Fraud Rate</div><div style="font-size:1.4rem;font-weight:700;color:{"#EF4444" if rate_db > 5 else "#10B981"}">{rate_db}%</div></div>', unsafe_allow_html=True)
+    k4.markdown(f'<div class="mcard"><div class="mcard-label">Avg RF Probability</div><div style="font-size:1.4rem;font-weight:700;color:#64748B">{avg_prob}%</div></div>', unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # Fraud rate over time
+    m1, m2 = st.columns(2)
+
+    with m1:
+        st.markdown('<div class="sec-label">📈 Fraud Rate Over Time</div>', unsafe_allow_html=True)
+        df_db["cumulative_fraud_rate"] = (
+            df_db["fraud_detected"].cumsum() / (df_db.index + 1) * 100
+        )
+        fig_m1 = go.Figure()
+        fig_m1.add_trace(go.Scatter(
+            x=df_db["id"],
+            y=df_db["cumulative_fraud_rate"],
+            mode="lines",
+            line=dict(color="#4F6EF7", width=2.5),
+            fill="tozeroy",
+            fillcolor="rgba(79,110,247,.07)",
+            name="Fraud Rate %"
+        ))
+        fig_m1.add_hline(
+            y=0.17, line_dash="dash", line_color="#F59E0B",
+            annotation_text="Expected real-world rate (~0.17%)",
+            annotation_font=dict(family="DM Sans", color="#B45309", size=11)
+        )
+        fig_m1.update_layout(
+            paper_bgcolor="white", plot_bgcolor="white",
+            font=dict(family="DM Sans", color="#1E293B"),
+            xaxis=dict(title="Transaction #", gridcolor="#F1F5F9"),
+            yaxis=dict(title="Cumulative Fraud Rate (%)", gridcolor="#F1F5F9"),
+            margin=dict(t=20, b=10, l=10, r=10), height=280, showlegend=False
+        )
+        st.plotly_chart(fig_m1, use_container_width=True)
+
+    with m2:
+        st.markdown('<div class="sec-label">🔴 RF Probability Distribution</div>', unsafe_allow_html=True)
+        fig_m2 = go.Figure()
+        fig_m2.add_trace(go.Histogram(
+            x=df_db["rf_probability"],
+            nbinsx=30,
+            marker_color="#4F6EF7",
+            opacity=0.8,
+            name="All transactions"
+        ))
+        fig_m2.add_trace(go.Histogram(
+            x=df_db[df_db["fraud_detected"] == 1]["rf_probability"],
+            nbinsx=30,
+            marker_color="#EF4444",
+            opacity=0.8,
+            name="Fraud only"
+        ))
+        fig_m2.update_layout(
+            paper_bgcolor="white", plot_bgcolor="white",
+            font=dict(family="DM Sans", color="#1E293B"),
+            xaxis=dict(title="RF Fraud Probability (%)", gridcolor="#F1F5F9"),
+            yaxis=dict(title="Count", gridcolor="#F1F5F9"),
+            barmode="overlay",
+            legend=dict(font=dict(family="DM Sans", size=11)),
+            margin=dict(t=20, b=10, l=10, r=10), height=280
+        )
+        st.plotly_chart(fig_m2, use_container_width=True)
+
+    # Recent predictions table
+    st.markdown('<div class="sec-label">🗂️ Recent Predictions (Last 10)</div>', unsafe_allow_html=True)
+    df_recent = df_db.tail(10).iloc[::-1].copy()
+    df_recent["Result"] = df_recent["fraud_detected"].apply(lambda x: "🚨 FRAUD" if x else "✅ Legit")
+    df_recent["RF Prob"] = df_recent["rf_probability"].apply(lambda x: f"{x}%")
+    st.dataframe(
+        df_recent[["timestamp", "Result", "RF Prob", "votes", "lr_result", "rf_result", "iso_result"]].rename(columns={
+            "timestamp": "Time",
+            "votes": "Votes (0-4)",
+            "lr_result": "LR",
+            "rf_result": "RF",
+            "iso_result": "ISO"
+        }),
+        use_container_width=True,
+        hide_index=True
+    )
